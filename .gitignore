@@ -1,0 +1,58 @@
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+**/.env.local
+**/trmnl_secrets.h
+**/*secret*
+**/*.pem
+**/*.key
+
+# macOS and editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Dependencies and local environments
+**/node_modules/
+**/.venv/
+.venv/
+.arduino15/
+.arduino-downloads/
+.arduino-downloads/
+.pio/
+**/.pio/
+
+# Build and generated output
+**/dist/
+**/build/
+**/coverage/
+**/*.o
+**/*.elf
+**/*.bin
+**/*.hex
+**/*.map
+
+# Local backups and archived experiments
+.backups/
+.codex-backups/
+backend.backup-*/
+server/.git-local-archive/
+
+# Runtime logs and local data
+**/*.log
+server/data/
+backend/data/
+backend/.backups/
+**/*.db
+**/*.sqlite
+**/*.sqlite-*
+
+# Historical snapshots kept locally for rollback
+**/*.backup-*
+**/*.pre-*
+
+# Large vendor archives/installers; keep source code under vendor/
+vendor/**/*.zip
+vendor/**/*.7z
+vendor/**/*.apk

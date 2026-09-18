@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">我们的小日常</title>
+  <desc id="desc">暖纸张背景上的 Ink Shadow Ghost</desc>
+  <rect width="512" height="512" fill="#f7f1e7"/>
+  <path d="M46 73 Q256 42 466 73" fill="none" stroke="#d8cdbd" stroke-width="5" stroke-linecap="round"/>
+  <path d="M46 439 Q256 470 466 439" fill="none" stroke="#d8cdbd" stroke-width="5" stroke-linecap="round"/>
+  <g transform="translate(108 60) scale(.62)">
+    <path fill="#625f58" stroke="#3a332b" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" d="M92 617 C110 552 118 487 113 409 C108 328 101 241 115 171 C126 116 155 70 203 38 L246 0 L258 78 L315 94 C338 181 336 275 334 361 C332 452 349 537 384 592 C359 610 326 617 292 611 C258 632 225 633 193 614 C159 628 124 628 92 617 Z"/>
+    <path fill="#4e4a44" opacity=".44" d="M273 83 C315 160 319 269 318 362 C317 454 335 536 367 585 C344 598 317 601 292 595 C276 600 261 602 245 600 C264 557 275 498 272 418 C268 309 254 201 273 83 Z"/>
+    <path fill="#eee6d7" stroke="#3a332b" stroke-width="6" stroke-linejoin="round" d="M246 0 L258 78 L298 70 Z"/>
+    <path fill="#d4a84f" stroke="#3a332b" stroke-width="6" stroke-linejoin="round" d="M253 178 Q274 156 294 178 L300 241 Q278 254 254 252 Z"/>
+    <path fill="#e8c873" d="M259 180 Q274 167 287 181 L291 235 Q276 242 261 241 Z"/>
+    <path fill="none" stroke="#3a332b" stroke-width="5" stroke-linecap="round" d="M274 168 L278 247 M258 213 Q276 209 296 211"/>
+    <g fill="#3a332b"><ellipse cx="132" cy="193" rx="5" ry="12"/><ellipse cx="169" cy="193" rx="5" ry="12"/></g>
+  </g>
+  <circle cx="406" cy="103" r="13" fill="#c46e4b"/>
+</svg>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.guozai.office-backend</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/rita/working/eink-trmnl-display/backend/node_modules/.bin/tsx</string>
+    <string>src/index.ts</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/rita/working/eink-trmnl-display/backend</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOST</key>
+    <string>0.0.0.0</string>
+    <key>PORT</key>
+    <string>3100</string>
+    <key>APP_TIMEZONE</key>
+    <string>Asia/Shanghai</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/rita/Library/Logs/guozai/backend.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/rita/Library/Logs/guozai/backend.error.log</string>
+</dict>
+</plist>
