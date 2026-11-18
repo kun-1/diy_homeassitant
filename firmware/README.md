@@ -50,12 +50,16 @@ ESP32 每 30 秒向 Mac mini Office API 的 `/api/devices/esp32-01/heartbeat` �
 
 ## 编译
 
+从仓库根目录运行以下命令，创建本地配置文件。
+
 ```bash
-cd /Users/zhuanzmima0000/Documents/Codex/2026-08-14/w-z/work/firmware
-pio run
+cd firmware
+cp include/trmnl_secrets.h.example include/trmnl_secrets.h
 ```
 
-编译前需要在 `include/trmnl_secrets.h` 提供本地副本；该文件被 `.gitignore` 忽略。不要把真实 token、Wi-Fi SSID 或密码提交到 Git、源码或日志。
+在本地副本填写设备 ID、BYOS token 和显示服务地址。Wi-Fi 配置留空时，可通过设备热点完成配网。Git 已忽略本地配置文件。
+
+配置后，在 `firmware/` 下运行 `pio run`。
 
 ## 人工验证步骤
 
