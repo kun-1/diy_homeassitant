@@ -107,7 +107,7 @@ function renderAuthorizePage(params: {
   h1 { font-size: 18px; margin: 0 0 8px; }
   p { font-size: 13px; color: #94a3b8; line-height: 1.5; margin: 0 0 16px; }
   label { display: block; font-size: 12px; color: #cbd5e1; margin-bottom: 6px; }
-  input[type="password"] { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: #fff; font-size: 14px; }
+  input[type="text"] { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: #fff; font-size: 14px; -webkit-text-security: disc; }
   button { width: 100%; margin-top: 16px; padding: 11px; border: none; border-radius: 8px; background: #38bdf8; color: #082f49; font-weight: 700; font-size: 14px; cursor: pointer; }
   .err { background: #7f1d1d; color: #fecaca; padding: 8px 10px; border-radius: 8px; font-size: 12px; margin-bottom: 12px; }
 </style>
@@ -122,8 +122,8 @@ function renderAuthorizePage(params: {
     <input type="hidden" name="state" value="${escapeHtml(params.state)}" />
     <input type="hidden" name="code_challenge" value="${escapeHtml(params.codeChallenge)}" />
     <input type="hidden" name="code_challenge_method" value="${escapeHtml(params.codeChallengeMethod)}" />
-    <label>访问密码 (MCP_TOKEN)</label>
-    <input type="password" name="passcode" required autofocus placeholder="输入 backend/.env.local 中的 MCP_TOKEN" />
+    <label>设备配对码 (MCP_TOKEN)</label>
+    <input type="text" name="passcode" autocomplete="off" spellcheck="false" required autofocus placeholder="输入 backend/.env.local 中的 MCP_TOKEN" />
     <button type="submit">确认授权并跳转</button>
   </form>
 </body>
