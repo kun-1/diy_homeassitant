@@ -1,25 +1,91 @@
 import { z } from 'zod';
-export const calendarProviderSelection = z.object({ provider: z.enum(['mock', 'google']).default('mock') });
-export const idParam = z.object({ id: z.string().min(1) });
-export const eventCreate = z.object({ title: z.string().min(1), startsAt: z.string().datetime(), endsAt: z.string().datetime(), description: z.string().nullable().default(null), location: z.string().nullable().default(null) });
-export const eventPatch = eventCreate.partial();
-export const todoCreate = z.object({ title: z.string().min(1), completed: z.boolean().default(false), dueDate: z.string().nullable().default(null) });
+import { DEFAULT_FONT_PROFILE, DEFAULT_FONT_SCALE } from './defaults.js';
+
+export const idParam = z.object({
+  id: z.string().min(1),
+});
+
+export const todoCreate = z.object({
+  title: z.string().min(1).max(200),
+  completed: z.boolean().default(false),
+  priority: z.enum(['high', 'normal', 'low']).default('normal'),
+  tag: z.string().max(40).nullable().default(null),
+  owner: z.string().max(40).nullable().default(null),
+  dueDate: z.string().max(40).nullable().default(null),
+});
+
 export const todoPatch = todoCreate.partial();
-export const letterPaper = z.enum(['border', 'emoji', 'receipt', 'minimal']);
-export const letterContent = z.enum(['none', 'polaroid', 'coupon', 'ghost-stamp', 'prescription']);
-export const letterMetadata = z.object({
-  content: letterContent.default('none'),
-  fontProfile: z.enum(['system', 'thermal-sans', 'pixel', 'pixel-large', 'pixel-hard', 'pixel-soft', 'heiti', 'hybrid', 'comparison']).optional(),
-  coupon: z.object({name:z.string().max(80),code:z.string().max(80),expiry:z.string().max(20)}).optional(),
-  ghostEmoji: z.string().max(8).optional(),
-  prescription: z.array(z.string().min(1).max(80)).max(5).optional(),
-  imageData: z.string().max(750_000).regex(/^data:image\/(?:png|jpeg);base64,/).optional(),
-}).strict();
-export const letterCreate = z.object({ title: z.string().min(1).max(80), body: z.string().min(1).max(500), signature: z.string().min(1).max(80), paper: letterPaper.default('border'), metadata: letterMetadata.default({content:'none'}) });
-export const letterPatch = letterCreate.partial().extend({ unread: z.boolean().optional(), archived: z.boolean().optional() });
-export const heartbeat = z.object({ batteryPct: z.number().int().min(0).max(100).nullable().default(null), powerBankPct: z.number().int().min(0).max(100).nullable().default(null), paperStatus: z.enum(['ok', 'near_end', 'out', 'unknown']).nullable().default(null), coverOpen: z.boolean().nullable().default(null), printerError: z.boolean().nullable().default(null), firmwareVersion: z.string().max(80).nullable().default(null), wifiRssiDbm: z.number().int().min(-127).max(0).nullable().default(null), uptimeSeconds: z.number().int().min(0).nullable().default(null), chipTemperatureC: z.number().finite().min(-40).max(125).nullable().default(null), ipAddress: z.string().max(64).nullable().default(null) });
-export const printerPaperOverride = z.object({ paperStatus: z.enum(['near_end', 'out']).nullable() });
-export const einkArrangement = z.object({
-  mode: z.enum(['birds', 'summary', 'schedule', 'todo', 'letters']),
-  content: z.object({schedule: z.boolean(), todo: z.boolean(), letters: z.boolean()}),
+
+export const ditherAlgorithmSchema = z.enum([
+  'atkinson',
+  'floyd-steinberg',
+  'bayer',
+  'threshold',
+]);
+
+export const photoOptionsSchema = z.object({
+  algorithm: ditherAlgorithmSchema.default('atkinson'),
+  gamma: z.number().min(0.5).max(3.5).default(1.8),
+  threshold: z.number().min(1).max(254).default(128),
+  contrastStretch: z.boolean().default(true),
+  brightness: z.number().min(-60).max(60).default(0),
+});
+
+export const renderOptionsSchema = z.object({
+  algorithm: ditherAlgorithmSchema.optional(),
+  gamma: z.number().min(0.5).max(3.5).optional(),
+  threshold: z.number().min(1).max(254).optional(),
+  fontScale: z.number().min(0.7).max(2.0).optional(),
+  hybrid: z.boolean().optional(),
+  photoOptions: photoOptionsSchema.optional(),
+});
+
+export const templateKindSchema = z.enum([
+  'todo',
+  'focus',
+  'note',
+  'photo',
+  'calibration',
+]);
+
+export const styleSchema = z.enum(['receipt', 'journal']);
+export const fontProfileSchema = z.string().min(1).max(160).default(DEFAULT_FONT_PROFILE);
+
+export const printerPreviewSchema = z.object({
+  template: templateKindSchema.default('todo'),
+  style: styleSchema.default('receipt'),
+  fontProfile: fontProfileSchema,
+  fontScale: z.number().min(0.7).max(2.0).default(DEFAULT_FONT_SCALE),
+  algorithm: ditherAlgorithmSchema.default('threshold'),
+  gamma: z.number().min(0.5).max(3.5).default(1.1),
+  threshold: z.number().min(1).max(254).default(120),
+  hybrid: z.boolean().optional(),
+  photoOptions: photoOptionsSchema.optional(),
+  data: z.record(z.unknown()).optional(),
+});
+
+export const printJobCreate = z.object({
+  template: templateKindSchema,
+  style: styleSchema.default('receipt'),
+  fontProfile: fontProfileSchema,
+  data: z.record(z.unknown()).default({}),
+  renderOptions: renderOptionsSchema.default({}),
+});
+
+export const printJobFail = z.object({
+  error: z.string().max(500).default('printer error'),
+  retryable: z.boolean().default(true),
+});
+
+export const heartbeatSchema = z.object({
+  batteryPct: z.number().int().min(0).max(100).nullable().default(null),
+  powerBankPct: z.number().int().min(0).max(100).nullable().default(null),
+  paperStatus: z.enum(['ok', 'near_end', 'out', 'unknown']).nullable().default(null),
+  coverOpen: z.boolean().nullable().default(null),
+  printerError: z.boolean().nullable().default(null),
+  firmwareVersion: z.string().max(80).nullable().default(null),
+  wifiRssiDbm: z.number().int().min(-127).max(0).nullable().default(null),
+  uptimeSeconds: z.number().int().min(0).nullable().default(null),
+  chipTemperatureC: z.number().finite().min(-40).max(125).nullable().default(null),
+  ipAddress: z.string().max(64).nullable().default(null),
 });

@@ -1,10 +1,9 @@
-# Mac mini services
+# Mac mini 常驻部署
 
-The three launch agents in `launchd/` keep the Office Companion stack alive after login or reboot:
+`launchd/com.guozai.office-backend.plist` 用于在 Mac mini 上开机自启 `backend/`（端口 `3100`，负责 SQLite、渲染引擎、打印队列与后续 MCP 接入）。
 
-- `com.guozai.office-backend`: API and SQLite on port 3100
-- `com.guozai.eink-renderer`: BYOS/E-ink rendering on port 3000
-- `com.guozai.pwa`: production PWA preview on port 4175
+部署时请按实际路径修改 plist 中的 `WorkingDirectory` 与环境变量（`HOST=0.0.0.0`、`PORT=3100`），复制到 `~/Library/LaunchAgents/` 后执行：
 
-Install them into `/Users/rita/Library/LaunchAgents`, then use `launchctl bootstrap gui/$(id -u)`.
-Logs are written under `/Users/rita/Library/Logs/guozai`.
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.guozai.office-backend.plist
+```

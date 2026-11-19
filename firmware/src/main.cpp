@@ -7,27 +7,16 @@
 #include <WebServer.h>
 #include <WiFi.h>
 
-#include "DEV_Config.h"
-#include "EPD.h"
-#include "GUI_Paint.h"
 #include "trmnl_secrets.h"
 
 namespace {
 
-constexpr uint16_t SCREEN_WIDTH = 800;
-constexpr uint16_t SCREEN_HEIGHT = 480;
-constexpr size_t SCREEN_ROW_BYTES = SCREEN_WIDTH / 8;
-constexpr size_t SCREEN_BYTES = SCREEN_ROW_BYTES * SCREEN_HEIGHT;
-constexpr size_t BMP_HEADER_BYTES = 62;
-constexpr size_t EPD_HEADER_BYTES = 4;
-constexpr size_t EPD_IMAGE_BYTES = EPD_HEADER_BYTES + SCREEN_BYTES * 2;
 constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 20000;
 constexpr uint32_t RETRY_DELAY_MS = 15000;
 constexpr uint32_t HEARTBEAT_INTERVAL_MS = 30000;
-constexpr char FIRMWARE_VERSION[] = "1.2.0";
+constexpr char FIRMWARE_VERSION[] = "2.0.0-printer";
 constexpr uint32_t PRINT_QUEUE_INTERVAL_MS = 5000;
-constexpr uint32_t MAX_IMAGE_BYTES = 200000;
-constexpr char SETUP_AP_PASSWORD_PREFIX[] = "Guozi-";
+constexpr char SETUP_AP_PASSWORD_PREFIX[] = "Printer-";
 constexpr char DEFAULT_OFFICE_API_ORIGIN[] = "http://192.168.31.34:3100";
 constexpr uint32_t PRINTER_BAUD = 115200;
 constexpr uint32_t PRINTER_READY_TIMEOUT_MS = 30000;
@@ -54,12 +43,7 @@ HardwareSerial printerSerial(1);
 WebServer setupServer(80);
 String wifiSsid;
 String wifiPassword;
-String serverOrigin;
 String officeApiOrigin;
-uint8_t *screenBuffer = nullptr;
-uint8_t *ryBuffer = nullptr;
-bool epdHasBeenCleared = false;
-String lastImageFilename;
 uint8_t ina219Address = 0;
 bool batteryMonitorReady = false;
 float lastBatteryVoltage = 0.0f;
@@ -757,22 +741,18 @@ String htmlEscape(const String &value) {
 }
 
 void loadConfig() {
-  preferences.begin("eink-trmnl", false);
-  wifiSsid = preferences.getString("wifi_ssid", DEFAULT_WIFI_SSID);
-  wifiPassword = preferences.getString("wifi_pass", DEFAULT_WIFI_PASSWORD);
-  serverOrigin = preferences.getString("server", DEFAULT_SERVER_ORIGIN);
+  preferences.begin("printer-todo", false);
+  wifiSsid = preferences.getString("wifi_ssid", "");
+  wifiPassword = preferences.getString("wifi_pass", "");
   officeApiOrigin = preferences.getString("api", DEFAULT_OFFICE_API_ORIGIN);
-  serverOrigin.trim();
+  if (wifiSsid.isEmpty()) {
+    Preferences legacy;
+    legacy.begin("eink-trmnl", true);
+    wifiSsid = legacy.getString("wifi_ssid", DEFAULT_WIFI_SSID);
+    wifiPassword = legacy.getString("wifi_pass", DEFAULT_WIFI_PASSWORD);
+    legacy.end();
+  }
   officeApiOrigin.trim();
-  // The display renderer remains on 3000; the business API/heartbeat is on 3100.
-  // Migrate the temporary single-origin value used during the UART test.
-  if (serverOrigin == "http://192.168.31.34:3100") {
-    serverOrigin = DEFAULT_SERVER_ORIGIN;
-    preferences.putString("server", serverOrigin);
-  }
-  while (serverOrigin.endsWith("/")) {
-    serverOrigin.remove(serverOrigin.length() - 1);
-  }
   while (officeApiOrigin.endsWith("/")) {
     officeApiOrigin.remove(officeApiOrigin.length() - 1);
   }
@@ -782,7 +762,7 @@ String setupApName() {
   const uint64_t chipId = ESP.getEfuseMac();
   char suffix[9];
   snprintf(suffix, sizeof(suffix), "%08lx", static_cast<unsigned long>(chipId & 0xffffffff));
-  return String("Eink-Setup-") + suffix;
+  return String("Printer-Setup-") + suffix;
 }
 
 String setupApPassword() {
@@ -812,58 +792,49 @@ void startSetupMode() {
     const String page =
         "<!doctype html><html lang='zh-CN'><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>电子墨水屏配置</title>"
+        "<title>热敏打印机联网配置</title>"
         "<style>body{font:16px system-ui;max-width:560px;margin:32px auto;padding:0 18px}"
         "label{display:block;margin:18px 0 6px}input{box-sizing:border-box;width:100%;padding:12px;font-size:16px}"
         "button{margin-top:24px;padding:12px 18px;font-size:16px}</style>"
-        "<h1>电子墨水屏联网配置</h1>"
-        "<p>填写 2.4GHz Wi‑Fi，以及 Mac mini 的两个服务地址。</p>"
-        "<p>这是本地配置入口，不提供 captive portal 自动跳转。</p>"
+        "<h1>热敏打印机联网配置</h1>"
+        "<p>填写 2.4GHz Wi‑Fi 以及后端服务地址（MacBook 或 Mac mini 的 3100 端口）。</p>"
         "<form method='post' action='/save'>"
         "<label>Wi‑Fi 名称</label><input name='ssid' required value='" + htmlEscape(wifiSsid) + "'>"
         "<label>Wi‑Fi 密码</label><input name='password' type='password' autocomplete='new-password'>"
-        "<label>E-ink 渲染地址</label><input name='server' value='" + htmlEscape(serverOrigin) + "' required>"
-        "<label>业务 API 地址</label><input name='api' value='" + htmlEscape(officeApiOrigin) + "' required>"
+        "<label>后端 API 地址</label><input name='api' value='" + htmlEscape(officeApiOrigin) + "' required>"
         "<button type='submit'>保存并连接</button></form></html>";
     setupServer.send(200, "text/html; charset=utf-8", page);
   });
 
   setupServer.on("/save", HTTP_POST, []() {
-    if (!setupServer.hasArg("ssid") || !setupServer.hasArg("server") || !setupServer.hasArg("api")) {
-      setupServer.send(400, "text/plain; charset=utf-8", "缺少 Wi-Fi、渲染地址或业务 API 地址");
+    if (!setupServer.hasArg("ssid") || !setupServer.hasArg("api")) {
+      setupServer.send(400, "text/plain; charset=utf-8", "缺少 Wi-Fi 或后端 API 地址");
       return;
     }
     String candidateSsid = setupServer.arg("ssid");
     String candidatePassword = setupServer.arg("password");
-    String candidateServer = setupServer.arg("server");
     String candidateApi = setupServer.arg("api");
     candidateSsid.trim();
     candidatePassword.trim();
-    candidateServer.trim();
     candidateApi.trim();
     if (candidateSsid.isEmpty() || candidateSsid.length() > 32 ||
         candidatePassword.length() > 63 ||
         (!candidatePassword.isEmpty() && candidatePassword.length() < 8) ||
-        !validServerOrigin(candidateServer) || !validServerOrigin(candidateApi)) {
+        !validServerOrigin(candidateApi)) {
       setupServer.send(400, "text/plain; charset=utf-8",
-                       "配置无效：SSID 不能为空且不超过 32 字符；Wi-Fi 密码为空或 8-63 字符；两个服务地址须以 http:// 或 https:// 开头。");
+                       "配置无效：SSID 不能为空且不超过 32 字符；Wi-Fi 密码为空或 8-63 字符；API 地址须以 http:// 或 https:// 开头。");
       return;
     }
     wifiSsid = candidateSsid;
     wifiPassword = candidatePassword;
-    serverOrigin = candidateServer;
     officeApiOrigin = candidateApi;
-    while (serverOrigin.endsWith("/")) {
-      serverOrigin.remove(serverOrigin.length() - 1);
-    }
     while (officeApiOrigin.endsWith("/")) {
       officeApiOrigin.remove(officeApiOrigin.length() - 1);
     }
     preferences.putString("wifi_ssid", wifiSsid);
     preferences.putString("wifi_pass", wifiPassword);
-    preferences.putString("server", serverOrigin);
     preferences.putString("api", officeApiOrigin);
-    setupServer.send(200, "text/html; charset=utf-8", "<h1>已保存</h1><p>设备正在重启并连接 Wi‑Fi，请等待屏幕刷新。</p>");
+    setupServer.send(200, "text/html; charset=utf-8", "<h1>已保存</h1><p>设备正在重启并连接 Wi‑Fi。</p>");
     delay(1200);
     ESP.restart();
   });
@@ -1023,90 +994,6 @@ void waitWithHeartbeat(uint32_t seconds) {
   }
 }
 
-bool readExact(WiFiClient &stream, uint8_t *buffer, size_t length) {
-  size_t received = 0;
-  const uint32_t startedAt = millis();
-  while (received < length && millis() - startedAt < 30000) {
-    const int available = stream.available();
-    if (available > 0) {
-      const size_t wanted = min(static_cast<size_t>(available), length - received);
-      const int count = stream.readBytes(reinterpret_cast<char *>(buffer + received), wanted);
-      if (count > 0) {
-        received += static_cast<size_t>(count);
-      }
-    } else {
-      delay(2);
-    }
-  }
-  return received == length;
-}
-
-uint16_t readLe16(const uint8_t *data) {
-  return static_cast<uint16_t>(data[0]) | (static_cast<uint16_t>(data[1]) << 8);
-}
-
-uint32_t readLe32(const uint8_t *data) {
-  return static_cast<uint32_t>(data[0]) |
-         (static_cast<uint32_t>(data[1]) << 8) |
-         (static_cast<uint32_t>(data[2]) << 16) |
-         (static_cast<uint32_t>(data[3]) << 24);
-}
-
-int32_t readLe32Signed(const uint8_t *data) {
-  return static_cast<int32_t>(readLe32(data));
-}
-
-bool decodeBmp(const uint8_t *bmp, size_t length, uint8_t *output) {
-  if (length < BMP_HEADER_BYTES || bmp[0] != 'B' || bmp[1] != 'M') {
-    Serial.println("BMP_INVALID signature");
-    return false;
-  }
-  const uint32_t pixelOffset = readLe32(bmp + 10);
-  const uint32_t dibSize = readLe32(bmp + 14);
-  const int32_t width = readLe32Signed(bmp + 18);
-  const int32_t height = readLe32Signed(bmp + 22);
-  const uint16_t planes = readLe16(bmp + 26);
-  const uint16_t bitsPerPixel = readLe16(bmp + 28);
-  const uint32_t compression = readLe32(bmp + 30);
-  if (dibSize < 40 || width != SCREEN_WIDTH || abs(height) != SCREEN_HEIGHT || planes != 1 ||
-      bitsPerPixel != 1 || compression != 0 || pixelOffset >= length || length > MAX_IMAGE_BYTES) {
-    Serial.printf("BMP_UNSUPPORTED width=%ld height=%ld bpp=%u compression=%lu\n",
-                  static_cast<long>(width), static_cast<long>(height), bitsPerPixel,
-                  static_cast<unsigned long>(compression));
-    return false;
-  }
-  const size_t sourceRowBytes = ((static_cast<size_t>(width) + 31) / 32) * 4;
-  if (pixelOffset + sourceRowBytes * SCREEN_HEIGHT > length) {
-    Serial.println("BMP_TRUNCATED");
-    return false;
-  }
-
-  // The server emits palette index 0 as white and index 1 as black.
-  // Inspect the palette so the decoder remains correct if that order changes.
-  const uint8_t paletteOffset = 54;
-  const uint32_t palette0Luma = static_cast<uint32_t>(bmp[paletteOffset]) + bmp[paletteOffset + 1] + bmp[paletteOffset + 2];
-  const uint32_t palette1Luma = static_cast<uint32_t>(bmp[paletteOffset + 4]) + bmp[paletteOffset + 5] + bmp[paletteOffset + 6];
-  const bool invert = palette0Luma > palette1Luma;
-  for (uint16_t y = 0; y < SCREEN_HEIGHT; y++) {
-    const uint16_t sourceY = height > 0 ? SCREEN_HEIGHT - 1 - y : y;
-    const uint8_t *source = bmp + pixelOffset + static_cast<size_t>(sourceY) * sourceRowBytes;
-    uint8_t *destination = output + static_cast<size_t>(y) * SCREEN_ROW_BYTES;
-    for (size_t x = 0; x < SCREEN_ROW_BYTES; x++) {
-      destination[x] = invert ? static_cast<uint8_t>(~source[x]) : source[x];
-    }
-  }
-  return true;
-}
-
-bool decodeEpdPlanes(const uint8_t *image, size_t length) {
-  if (length != EPD_IMAGE_BYTES || memcmp(image, "E2P1", EPD_HEADER_BYTES) != 0) {
-    return false;
-  }
-  memcpy(screenBuffer, image + EPD_HEADER_BYTES, SCREEN_BYTES);
-  memcpy(ryBuffer, image + EPD_HEADER_BYTES + SCREEN_BYTES, SCREEN_BYTES);
-  return true;
-}
-
 String jsonString(const String &json, const char *key) {
   const String marker = String("\"") + key + "\":\"";
   const int start = json.indexOf(marker);
@@ -1140,101 +1027,20 @@ uint32_t jsonNumber(const String &json, const char *key, uint32_t fallback) {
   return static_cast<uint32_t>(value.toInt());
 }
 
-bool fetchAndDisplay(uint32_t &refreshSeconds) {
-  HTTPClient api;
-  const String apiUrl = serverOrigin + "/api/display";
-  api.begin(apiUrl);
-  api.addHeader("ID", TRMNL_DEVICE_ID);
-  api.addHeader("access-token", TRMNL_ACCESS_TOKEN);
-  api.addHeader("battery-voltage", "3.3");
-  api.setTimeout(30000);
-  const int apiStatus = api.GET();
-  if (apiStatus != HTTP_CODE_OK) {
-    Serial.printf("DISPLAY_API_FAILED http=%d error=%s\n", apiStatus, api.errorToString(apiStatus).c_str());
-    api.end();
-    return false;
-  }
-  const String response = api.getString();
-  refreshSeconds = max<uint32_t>(30, jsonNumber(response, "refresh_rate", 900));
-  const String imageFilename = jsonString(response, "filename");
-  const String imageUrl = jsonString(response, "image_url");
-  if (imageUrl.isEmpty()) {
-    Serial.println("DISPLAY_API_FAILED missing image_url");
-    api.end();
-    return false;
-  }
-  api.end();
-  if (!imageFilename.isEmpty() && imageFilename == lastImageFilename) {
-    Serial.printf("DISPLAY_UNCHANGED refresh_seconds=%lu\n", static_cast<unsigned long>(refreshSeconds));
-    return true;
-  }
-
-  HTTPClient image;
-  image.begin(imageUrl);
-  image.setTimeout(60000);
-  const int imageStatus = image.GET();
-  const int contentLength = image.getSize();
-  if (imageStatus != HTTP_CODE_OK || contentLength <= 0 || contentLength > static_cast<int>(MAX_IMAGE_BYTES)) {
-    Serial.printf("IMAGE_FAILED http=%d bytes=%d error=%s\n", imageStatus, contentLength, image.errorToString(imageStatus).c_str());
-    image.end();
-    return false;
-  }
-  uint8_t *bmp = static_cast<uint8_t *>(malloc(static_cast<size_t>(contentLength)));
-  if (bmp == nullptr) {
-    Serial.println("IMAGE_FAILED no_memory");
-    image.end();
-    return false;
-  }
-  WiFiClient *stream = image.getStreamPtr();
-  const bool received = readExact(*stream, bmp, static_cast<size_t>(contentLength));
-  image.end();
-  bool decoded = false;
-  if (received) {
-    decoded = decodeEpdPlanes(bmp, static_cast<size_t>(contentLength));
-    if (!decoded) {
-      memset(ryBuffer, 0xFF, SCREEN_BYTES);
-      decoded = decodeBmp(bmp, static_cast<size_t>(contentLength), screenBuffer);
-    }
-  }
-  free(bmp);
-  if (!decoded) {
-    Serial.println("IMAGE_FAILED decode");
-    return false;
-  }
-
-  DEV_Module_Init();
-  if (!epdHasBeenCleared) {
-    // One full clear is enough after switching to the B/W/R driver. A second
-    // clear only adds another long flash sequence during boot/recovery.
-    Serial.println("EPD_CLEAR recovery_once");
-    EPD_7IN5B_V2_Init();
-    EPD_7IN5B_V2_Clear();
-    epdHasBeenCleared = true;
-  }
-  // Match the official B/W/R V2 demo sequence: after a full clear, re-enter the
-  // fast-display initialization before sending the actual frame.
-  EPD_7IN5B_V2_Init_Fast();
-  EPD_7IN5B_V2_Display(screenBuffer, ryBuffer);
-  EPD_7IN5B_V2_Sleep();
-  lastImageFilename = imageFilename;
-  Serial.printf("DISPLAY_OK bytes=%d refresh_seconds=%lu\n", contentLength, static_cast<unsigned long>(refreshSeconds));
-  return true;
-}
-
 }  // namespace
 
 void applyPrinterQualityPreset() {
-  // EM5823H DW_V1.0.3 ranges: PTDP 0-39, CUCL 5-9,
-  // PHSP 0-12, SPMD 1-4. The previous 36/9 combination made
-  // dense raster rows bleed on this 5-9V unit. Use the documented
-  // example concentration, mid current, slow speed and voltage-adaptive mode.
+  // EM5823H DW_V1.0.3 ranges: PTDP 0-39 (density), CUCL 5-9 (larger = lower peak current),
+  // PHSP 0-12 (0 = slowest/darkest), SPMD 1-4 (3 = voltage-adaptive).
+  // At 5.1V (PTVL ~5100mV), PTDP=25/CUCL=7 is far too faint; boost density and
+  // slow down feed speed so 5V thermal heating produces crisp dark dots.
   if (!waitPrinterReady(1000)) {
     Serial.println("PRINTER_QUALITY_PRESET_SKIPPED printer_not_ready");
     return;
   }
-  setPrinterSetting("CUCL", 7);
-  setPrinterSetting("SPMD", 3);
-  setPrinterSetting("PTDP", 25);
+  setPrinterSetting("CUCL", 6);
+  setPrinterSetting("SPMD", 4);
+  setPrinterSetting("PTDP", 36);
   setPrinterSetting("PHSP", 1);
   queryPrinterSetting("CUCL");
   queryPrinterSetting("SPMD");
@@ -1242,27 +1048,17 @@ void applyPrinterQualityPreset() {
   queryPrinterSetting("PHSP");
   queryPrinterSetting("PTVL");
   queryPrinterSetting("PTTE");
-  Serial.println("PRINTER_QUALITY_PRESET_APPLIED profile=balanced-raster");
+  Serial.println("PRINTER_QUALITY_PRESET_APPLIED profile=5v-high-contrast");
 }
 
 void setup() {
   Serial.begin(115200);
   delay(1500);
-  Serial.printf("IOT_DISPLAY_BOOT version=%s\\n", FIRMWARE_VERSION);
+  Serial.printf("PRINTER_NODE_BOOT version=%s\n", FIRMWARE_VERSION);
   initPrinterSerial();
   applyPrinterQualityPreset();
   loadConfig();
   initBatteryMonitor();
-  screenBuffer = static_cast<uint8_t *>(malloc(SCREEN_BYTES));
-  ryBuffer = static_cast<uint8_t *>(malloc(SCREEN_BYTES));
-  if (screenBuffer == nullptr || ryBuffer == nullptr) {
-    Serial.println("FATAL no_screen_buffers");
-    while (true) {
-      delay(1000);
-    }
-  }
-  // The 075RW panel is the B/W/R family. Keep the red/yellow plane white.
-  memset(ryBuffer, 0xFF, SCREEN_BYTES);
   if (!connectWifi()) {
     startSetupMode();
   }
@@ -1275,12 +1071,7 @@ void loop() {
     waitWithHeartbeat(RETRY_DELAY_MS / 1000);
     return;
   }
-  uint32_t refreshSeconds = 900;
-  if (!fetchAndDisplay(refreshSeconds)) {
-    sendHeartbeat();
-    waitWithHeartbeat(RETRY_DELAY_MS / 1000);
-    return;
-  }
+  // Pure wireless printer + battery node: heartbeat every 30s, poll queue every 5s.
+  waitWithHeartbeat(HEARTBEAT_INTERVAL_MS / 1000);
   sendHeartbeat();
-  waitWithHeartbeat(refreshSeconds);
 }

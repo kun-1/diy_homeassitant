@@ -1,12 +1,210 @@
-import Fastify from 'fastify'; import cors from '@fastify/cors'; import {z} from 'zod'; import {openDb} from './db.js'; import {OfficeService} from './service.js'; import {einkArrangement,eventCreate,eventPatch,heartbeat,idParam,letterCreate,letterPatch,printerPaperOverride,todoCreate,todoPatch} from './schemas.js'; import {getWeather} from './weather.js'; import {todayInShanghai} from './date.js';
-const parse=(s:z.ZodTypeAny,v:unknown)=>{const r=s.safeParse(v);if(!r.success)throw Object.assign(new Error('validation failed'),{statusCode:400,details:r.error.flatten()});return r.data};
- export function buildApp(dbPath=':memory:',calendarProvider:'mock'|'google'='mock'){const app=Fastify({logger:false}); const svc=new OfficeService(openDb(dbPath),calendarProvider); app.register(cors); app.setErrorHandler((e,_,res)=>res.status((e as {statusCode?:number}).statusCode??500).send({error:(e as Error).message,code:(e as {code?:string}).code,provider:(e as {provider?:string}).provider,details:(e as {details?:unknown}).details}));
- app.get('/api/health',()=>({status:'ok',providerMode:svc.calendar.status.provider,calendarProvider:svc.calendar.status,revision:svc.revision()}));
- app.get('/api/calendar/events',()=>svc.calendar.list()); app.post('/api/calendar/events',(r,res)=>{const v=svc.calendar.create(parse(eventCreate,r.body));svc.bump();return res.code(201).send(v)}); app.patch('/api/calendar/events/:id',(r,res)=>{const v=svc.calendar.update(parse(idParam,r.params).id,parse(eventPatch,r.body));if(!v)return res.code(404).send({error:'not found'});svc.bump();return v}); app.delete('/api/calendar/events/:id',(r,res)=>{const ok=svc.calendar.delete(parse(idParam,r.params).id);if(!ok)return res.code(404).send({error:'not found'});svc.bump();return res.code(204).send()});
- app.get('/api/todos',()=>svc.todos.list()); app.post('/api/todos',(r,res)=>{const v=svc.todos.create(parse(todoCreate,r.body));svc.bump();return res.code(201).send(v)}); app.patch('/api/todos/:id',(r,res)=>{const v=svc.todos.update(parse(idParam,r.params).id,parse(todoPatch,r.body));if(!v)return res.code(404).send({error:'not found'});svc.bump();return v}); app.delete('/api/todos/:id',(r,res)=>{if(!svc.todos.delete(parse(idParam,r.params).id))return res.code(404).send({error:'not found'});svc.bump();return res.code(204).send()});
- app.get('/api/letters',()=>svc.letters.list()); app.post('/api/letters',(r,res)=>{const v=svc.letters.create(parse(letterCreate,r.body));svc.bump();return res.code(201).send(v)}); app.get('/api/letters/:id',(r,res)=>{const v=svc.letters.get(parse(idParam,r.params).id);return v??res.code(404).send({error:'not found'})}); app.patch('/api/letters/:id',(r,res)=>{const letterId=parse(idParam,r.params).id;const old=svc.letters.get(letterId);const v=svc.letters.update(letterId,parse(letterPatch,r.body));if(v&&old&&(v.unread!==old.unread||v.archived!==old.archived))svc.bump();return v??res.code(404).send({error:'not found'})}); app.delete('/api/letters/:id',(r,res)=>{const letterId=parse(idParam,r.params).id;const existing=svc.letters.get(letterId);if(!existing)return res.code(404).send({error:'not found'});if(existing.archived)return res.code(409).send({error:'archived letters cannot be deleted',code:'LETTER_ARCHIVED'});if(!svc.letters.delete(letterId))return res.code(404).send({error:'not found'});svc.bump();return res.code(204).send()});
- app.get('/api/print/jobs',()=>svc.printer.list()); app.post('/api/print/jobs',(r,res)=>{const body=parse(z.object({letterId:z.string().min(1)}),r.body);if(!svc.letters.get(body.letterId))return res.code(404).send({error:'letter not found'});return res.code(201).send(svc.printer.create(body.letterId))}); app.get('/api/print/jobs/next',(_,res)=>{const claimed=svc.claimPrint();return claimed??res.code(204).send()}); app.get('/api/print/jobs/:id',(r,res)=>{const v=svc.printer.get(parse(idParam,r.params).id);return v??res.code(404).send({error:'not found'})}); app.post('/api/print/jobs/:id/complete',(r,res)=>{const id=parse(idParam,r.params).id;const before=svc.printer.get(id);if(!before)return res.code(404).send({error:'not found'});if((before as {status:string}).status!=='printing')return res.code(409).send({error:'print job must be printing before completion',code:'PRINT_JOB_INVALID_TRANSITION',status:(before as {status:string}).status});return svc.completePrint(id)}); app.post('/api/print/jobs/:id/fail',(r,res)=>{const body=parse(z.object({error:z.string().max(500).default('printer error'),retryable:z.boolean().default(true)}),r.body);const id=parse(idParam,r.params).id;const before=svc.printer.get(id);if(!before)return res.code(404).send({error:'not found'});if((before as {status:string}).status!=='printing')return res.code(409).send({error:'print job must be printing before failure',code:'PRINT_JOB_INVALID_TRANSITION',status:(before as {status:string}).status});return svc.failPrint(id,body.error,body.retryable)}); app.post('/api/print/jobs/:id/retry',(r,res)=>{const id=parse(idParam,r.params).id;const before=svc.printer.get(id);if(!before)return res.code(404).send({error:'not found'});const v=svc.retryPrint(id);if((v as {status:string}).status!=='queued')return res.code(409).send({error:'print job retry limit reached or job is not failed',code:'PRINT_JOB_RETRY_EXHAUSTED',status:(v as {status:string}).status});return v});
- app.get('/api/devices',()=>svc.deviceList()); app.get('/api/devices/macmini-01/status',(_,res)=>{const v=svc.macMiniStatus();return v??res.code(404).send({error:'macmini not found'})}); app.patch('/api/devices/printer-01/paper',(r)=>svc.updatePrinterPaperOverride(parse(printerPaperOverride,r.body).paperStatus)); app.post('/api/devices/:id/heartbeat',(r,res)=>{const deviceId=parse(idParam,r.params).id;const known=svc.devices.list().find(x=>x.id===deviceId);if(!known)return res.code(404).send({error:'not found'});if(known.kind==='eink')return res.code(409).send({error:'eink heartbeat is not supported; status is derived from esp32',code:'EINK_HEARTBEAT_NOT_SUPPORTED'});const body=parse(heartbeat,r.body);const before=known;const v=svc.devices.heartbeat(deviceId,body.batteryPct,{paperStatus:body.paperStatus,coverOpen:body.coverOpen,printerError:body.printerError,firmwareVersion:body.firmwareVersion,wifiRssiDbm:body.wifiRssiDbm,uptimeSeconds:body.uptimeSeconds,chipTemperatureC:body.chipTemperatureC,ipAddress:body.ipAddress});if(!v)return res.code(409).send({error:'device heartbeat is not supported',code:'DEVICE_HEARTBEAT_NOT_SUPPORTED'});let powerBank=null;if(deviceId==='esp32-01'&&body.powerBankPct!==null){const beforePower=svc.devices.list().find(x=>x.kind==='powerBank');powerBank=svc.devices.heartbeat('powerbank-01',body.powerBankPct);if(powerBank&&(beforePower?.status!==powerBank.status||beforePower?.batteryPct!==powerBank.batteryPct))svc.bump()}if(before.status!==v.status||before.batteryPct!==v.batteryPct||before.paperStatus!==v.paperStatus||before.coverOpen!==v.coverOpen||before.printerError!==v.printerError)svc.bump();return v});
- app.get('/api/eink/config',()=>svc.einkConfig()); app.patch('/api/eink/config',(r)=>svc.updateEinkConfig(parse(einkArrangement,r.body)));
- app.get('/api/eink/state',(r,res)=>{const state=svc.state();const tag='"eink-'+state.revision+'"';res.header('ETag',tag);if(r.headers['if-none-match']===tag)return res.code(304).send();return state}); app.get('/api/eink/state/version',()=>({revision:svc.revision()})); app.get('/api/eink/preview',async(_,res)=>{const response=await fetch('http://127.0.0.1:3000/admin/screen');if(!response.ok)return res.code(502).send({error:'eink preview unavailable'});res.header('content-type','image/bmp');return Buffer.from(await response.arrayBuffer())}); app.get('/api/today',async()=>{const state=svc.state();return {date:todayInShanghai(),config:state.config,calendarEvents:state.calendarEvents,todos:state.todos,unreadLetterCount:state.unreadLetterCount,devices:state.devices,weather:await getWeather()}});
- return app;}
+import cors from '@fastify/cors';
+import Fastify from 'fastify';
+import { z } from 'zod';
+import { openDb } from './db.js';
+import { DEBUG_PRINTER_HTML } from './debug-printer-ui.js';
+import { registerMcp } from './mcp.js';
+import { registerOAuth } from './oauth.js';
+import {
+  heartbeatSchema,
+  idParam,
+  printerPreviewSchema,
+  printJobCreate,
+  printJobFail,
+  todoCreate,
+  todoPatch,
+} from './schemas.js';
+import { PrinterTodoService, type ThermalRenderer } from './service.js';
+
+function parseOrThrow<T extends z.ZodTypeAny>(schema: T, value: unknown): z.infer<T> {
+  const result = schema.safeParse(value);
+  if (!result.success) {
+    throw Object.assign(new Error('validation failed'), {
+      statusCode: 400,
+      details: result.error.flatten(),
+    });
+  }
+  return result.data;
+}
+
+export function buildApp(dbPath = ':memory:', renderer?: ThermalRenderer) {
+  const app = Fastify({ logger: false });
+  const svc = new PrinterTodoService(openDb(dbPath), renderer);
+
+  app.register(cors);
+  app.setErrorHandler((err, _req, res) => {
+    const statusCode = (err as { statusCode?: number }).statusCode ?? 500;
+    return res.status(statusCode).send({
+      error: (err as Error).message,
+      code: (err as { code?: string }).code,
+      details: (err as { details?: unknown }).details,
+    });
+  });
+
+  // Health
+  app.get('/api/health', () => ({
+    status: 'ok',
+    printerReady: svc.isPrinterReady(),
+    queuedJobs: svc.printJobs.list(100).filter((j) => j.status === 'queued').length,
+  }));
+
+  // Todos
+  app.get('/api/todos', (req) => {
+    const owner = (req.query as { owner?: string }).owner;
+    return svc.todos.list(owner);
+  });
+
+  app.post('/api/todos', (req, res) => {
+    const body = parseOrThrow(todoCreate, req.body);
+    return res.code(201).send(svc.todos.create(body));
+  });
+
+  app.patch('/api/todos/:id', (req, res) => {
+    const { id } = parseOrThrow(idParam, req.params);
+    const body = parseOrThrow(todoPatch, req.body);
+    const updated = svc.todos.update(id, body);
+    return updated ?? res.code(404).send({ error: 'todo not found' });
+  });
+
+  app.delete('/api/todos/:id', (req, res) => {
+    const { id } = parseOrThrow(idParam, req.params);
+    if (!svc.todos.delete(id)) {
+      return res.code(404).send({ error: 'todo not found' });
+    }
+    return res.code(204).send();
+  });
+
+  // Print queue
+  app.get('/api/print/jobs', () => svc.printJobs.list());
+
+  app.post('/api/print/jobs', { bodyLimit: 8 * 1024 * 1024 }, (req, res) => {
+    const body = parseOrThrow(printJobCreate, req.body);
+    const job = svc.printJobs.create({
+      template: body.template,
+      style: body.style,
+      fontProfile: body.fontProfile,
+      payload: body.data,
+      renderOptions: body.renderOptions,
+    });
+    return res.code(201).send(job);
+  });
+
+  app.get('/api/print/jobs/next', async (_req, res) => {
+    const claimed = await svc.claimNextPrintJob();
+    return claimed ?? res.code(204).send();
+  });
+
+  app.get('/api/print/jobs/:id', (req, res) => {
+    const { id } = parseOrThrow(idParam, req.params);
+    const job = svc.printJobs.get(id);
+    return job ?? res.code(404).send({ error: 'print job not found' });
+  });
+
+  app.post('/api/print/jobs/:id/complete', (req, res) => {
+    const { id } = parseOrThrow(idParam, req.params);
+    const before = svc.printJobs.get(id);
+    if (!before) return res.code(404).send({ error: 'print job not found' });
+    if (before.status !== 'printing') {
+      return res.code(409).send({
+        error: 'print job must be printing before completion',
+        code: 'PRINT_JOB_INVALID_TRANSITION',
+        status: before.status,
+      });
+    }
+    return svc.printJobs.complete(id);
+  });
+
+  app.post('/api/print/jobs/:id/fail', (req, res) => {
+    const { id } = parseOrThrow(idParam, req.params);
+    const body = parseOrThrow(printJobFail, req.body);
+    const before = svc.printJobs.get(id);
+    if (!before) return res.code(404).send({ error: 'print job not found' });
+    if (before.status !== 'printing') {
+      return res.code(409).send({
+        error: 'print job must be printing before failure',
+        code: 'PRINT_JOB_INVALID_TRANSITION',
+        status: before.status,
+      });
+    }
+    return svc.printJobs.fail(id, body.error, body.retryable);
+  });
+
+  app.post('/api/print/jobs/:id/retry', (req, res) => {
+    const { id } = parseOrThrow(idParam, req.params);
+    const before = svc.printJobs.get(id);
+    if (!before) return res.code(404).send({ error: 'print job not found' });
+    const retried = svc.printJobs.retry(id);
+    if (!retried || retried.status !== 'queued') {
+      return res.code(409).send({
+        error: 'print job retry limit reached or job is not failed',
+        code: 'PRINT_JOB_RETRY_EXHAUSTED',
+        status: retried?.status,
+      });
+    }
+    return retried;
+  });
+
+  // Devices & battery heartbeat
+  app.get('/api/devices', () => svc.devices.list());
+
+  app.post('/api/devices/:id/heartbeat', (req, res) => {
+    const { id } = parseOrThrow(idParam, req.params);
+    const body = parseOrThrow(heartbeatSchema, req.body);
+    const updated = svc.devices.heartbeat(id, {
+      batteryPct: body.batteryPct,
+      paperStatus: body.paperStatus,
+      coverOpen: body.coverOpen,
+      printerError: body.printerError,
+      firmwareVersion: body.firmwareVersion,
+      wifiRssiDbm: body.wifiRssiDbm,
+      uptimeSeconds: body.uptimeSeconds,
+      chipTemperatureC: body.chipTemperatureC,
+      ipAddress: body.ipAddress,
+    });
+    if (!updated) return res.code(404).send({ error: 'device not found' });
+
+    if (id === 'esp32-01' && body.powerBankPct !== null) {
+      svc.devices.heartbeat('powerbank-01', { batteryPct: body.powerBankPct });
+    }
+    return updated;
+  });
+
+  // Zero-paper browser debug workbench & preview API
+  app.get('/debug/printer', (_req, res) => {
+    res.header('content-type', 'text/html; charset=utf-8');
+    return DEBUG_PRINTER_HTML;
+  });
+
+  app.post('/api/printer/preview', { bodyLimit: 8 * 1024 * 1024 }, async (req) => {
+    const body = parseOrThrow(printerPreviewSchema, req.body);
+    const out = await svc.renderer({
+      template: body.template,
+      style: body.style,
+      fontProfile: body.fontProfile,
+      fontScale: body.fontScale,
+      algorithm: body.algorithm,
+      gamma: body.gamma,
+      threshold: body.threshold,
+      hybrid: body.hybrid,
+      photoOptions: body.photoOptions,
+      data: body.data,
+    });
+    return {
+      widthPx: out.raster.payload.widthPx,
+      heightPx: out.raster.payload.heightPx,
+      bytesPerRow: out.raster.payload.bytesPerRow,
+      byteLength: out.raster.bitmap.length,
+      renderMs: out.renderMs,
+      stats: out.raster.stats,
+      bitmapB64: out.raster.payload.bitmapB64,
+      originalPngDataUrl: 'data:image/png;base64,' + out.originalPng.toString('base64'),
+      ditheredPngDataUrl: 'data:image/png;base64,' + out.raster.previewPng.toString('base64'),
+    };
+  });
+
+  // OAuth 2.0 + Remote MCP endpoint (exposed via Cloudflare Tunnel)
+  registerOAuth(app);
+  registerMcp(app, svc);
+
+  return app;
+}

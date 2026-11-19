@@ -3,14 +3,15 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.guozai.office-backend</string>
+  <string>com.printer-todo.backend</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/rita/working/eink-trmnl-display/backend/node_modules/.bin/tsx</string>
+    <string>/Users/rita/working/printer_todo/backend/node_modules/.bin/tsx</string>
+    <string>--env-file-if-exists=.env.local</string>
     <string>src/index.ts</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/Users/rita/working/eink-trmnl-display/backend</string>
+  <string>/Users/rita/working/printer_todo/backend</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
@@ -29,8 +30,8 @@
   <key>ThrottleInterval</key>
   <integer>5</integer>
   <key>StandardOutPath</key>
-  <string>/Users/rita/Library/Logs/guozai/backend.log</string>
+  <string>/Users/rita/Library/Logs/printer-todo/backend.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/rita/Library/Logs/guozai/backend.error.log</string>
+  <string>/Users/rita/Library/Logs/printer-todo/backend.error.log</string>
 </dict>
 </plist>
